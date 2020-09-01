@@ -14,12 +14,9 @@ from scipy import stats
 import seaborn as sns
 #from pyparsing import Word, alphas    ## OK installed
 
-#data = {'SMA_a': [], 'SMA_b': [], 'Alpha': [], 'Beta': [], 'Benchmark_AR': [], 'Portfolio_AR': [] }
-#pairs_df = pd.DataFrame(columns = ['SMA_a', 'SMA_b', 'Alpha', 'Beta', 'Benchmark_AR', 'Portfolio_AR'])
-
 
 def main():
-    start_time = time.time()
+       
     # Load data from CSV while offline
     #csvfilename = 'GSPC-2yrs.csv' ## Total: 503 rows of data
     csvfilename = 'GSPC-40yrs.csv' ## Total: 10,086 rows of data
@@ -29,30 +26,31 @@ def main():
     #df = data.get_data_yahoo(tickers, start = '2018-01-01', end = '2020-01-01') # get data from yahoof online
 
     # Config
-    global min_SMA, max_SMA, min_interval
+    global min_SMA, max_SMA, min_interval, plot
     min_SMA = 10
     max_SMA = 200
     min_interval = 20  # set the minimum interval days between two SMA
+    plot = ''
 
-    pair_SMA(df)
+    print("Loading S&P500 data...\n", df)
+
+    cal_run_time(df)
+    goahead = input('\nReturn "Y" to continue or any key to quit :') 
+    if goahead == 'Y' or goahead == 'y':
+        print('Here we go...')
+        pair_SMA(df)
     
     #pd.set_option("display.max_rows", None)
-    #print(df)
     #print(pairs_df)
     #plotgraph(df) # only the df and may not the actual SMAs
-    elapsed_time = time.time() - start_time
-    print("Program elapsed: ", time.strftime("%H:%M:%S", time.gmtime(elapsed_time)))
-
-    ## Pair up combination of SMA and call start_run    
-def pair_SMA(df):
-    col = ['SMA_a', 'SMA_b', 'Alpha', 'Beta', 'Benchmark_AR', 'Portfolio_AR']
-    pairs_df = pd.DataFrame(columns=col)
+    
+## Calculate total combination and apprx time needed
+def cal_run_time(df):
+    index = 0
     SMA_a = min_SMA # initiate SMA_a to compare
     SMA_b = max_SMA
-    index = 0
-    for i in range(max_SMA - min_SMA - min_interval+1):
-        for j in range(max_SMA - min_SMA - min_interval+1):
-            pairs_df.loc[index] = run_test(df, SMA_a, SMA_b)
+    for _ in range(max_SMA - min_SMA - min_interval+1):
+        for _ in range(max_SMA - min_SMA - min_interval+1):
             index += 1
             SMA_b -= 1 
             if SMA_b - SMA_a < min_interval:
@@ -61,17 +59,49 @@ def pair_SMA(df):
         SMA_a += 1
         if SMA_b - SMA_a < min_interval:
             break
+    # Run one sample test and count time
+    start_time = time.time()
+    run_test(df, SMA_a, SMA_a+min_interval, plot=False)
+    elapsed_time = (time.time() - start_time) * index
+    print(f"\nFrom SMA{min_SMA} to {max_SMA}, interval={min_interval}, Total Combinations: {index}, it takes approximately {time.strftime('%H:%M:%S', time.gmtime(elapsed_time))}(HH:MM:SS) to complete.")
+   
 
-    print(pairs_df)
-    print("Largest Return Combination: \n",pairs_df.nlargest(3, ['Portfolio_AR']))
-    print("Largest Alpha Combination: \n",pairs_df.nlargest(3, ['Alpha']))
-    print("Smalles Beta Combination: \n",pairs_df.nsmallest(3, ['Beta']))
+## Pair up combination of SMA and call start_run    
+def pair_SMA(df):
+    start_time = time.time()
+    index = 0
+
+    col = ['SMA_a', 'SMA_b', 'Alpha', 'Beta', 'Benchmark_AR', 'Portfolio_AR']
+    pairs_df = pd.DataFrame(columns=col)
+    SMA_a = min_SMA # initiate SMA_a to compare
+    SMA_b = max_SMA
+    
+    for _ in range(max_SMA - min_SMA - min_interval+1):
+        for _ in range(max_SMA - min_SMA - min_interval+1):
+            index += 1
+            pairs_df.loc[index] = run_test(df, SMA_a, SMA_b, plot=False)
+            SMA_b -= 1 
+            if SMA_b - SMA_a < min_interval:
+                break
+        SMA_b = max_SMA    
+        SMA_a += 1
+        if SMA_b - SMA_a < min_interval:
+            break
+    
+    print("Combination and result of all strategies' pairs\n", pairs_df)
+    print("\nTop 3 Largest Return Combination: \n",pairs_df.nlargest(3, ['Portfolio_AR']))
+    print("\nTop 3 Largest Alpha Combination: \n",pairs_df.nlargest(3, ['Alpha']))
+    print("\nTop 3 Smalles Beta Combination: \n",pairs_df.nsmallest(3, ['Beta']))
+    elapsed_time = time.time() - start_time
+    print("\nProgram elapsed: ", time.strftime("%H:%M:%S", time.gmtime(elapsed_time)))
+
+    # plot the best Alpha graph and regression
+    run_test(df, int(pairs_df.loc[pairs_df["Alpha"].idxmax(),'SMA_a']), int(pairs_df.loc[pairs_df["Alpha"].idxmax(),'SMA_b']), plot = True)
     return pairs_df
     
 
-    ## Run SMA test and generate/return its portfolio's data
-   
-def run_test(df, SMA_a, SMA_b):
+## Run SMA test and generate/return its portfolio's data
+def run_test(df, SMA_a, SMA_b, plot):
     df['SMA_a'] = df.iloc[:,1].rolling(window= SMA_a ).mean()
     df['SMA_b'] = df.iloc[:,1].rolling(window= SMA_b ).mean()
     
@@ -116,8 +146,9 @@ def run_test(df, SMA_a, SMA_b):
     benchmark_ret = df["Close"].pct_change()[1:] # daily return percentage change
     (beta, alpha) = stats.linregress(benchmark_ret.values, port_ret.values)[0:2]    
     
-    #plotgraph(df, benchmark_ret, port_ret)
-    #plotreg(benchmark_ret,port_ret)
+    if plot == True:
+        plotgraph(df, benchmark_ret, port_ret)
+        plotreg(benchmark_ret,port_ret)
     #port_summary(df)
     return [SMA_a, SMA_b, alpha, beta, benchmark_ar, port_ar] # return data as a list
 
@@ -137,6 +168,7 @@ def port_summary(df):
     print("Portfolio Compounded Annual Return is", port_ar)
       
 
+## plot portfolio vs benchmark graph
 def plotgraph(df, benchmark_ret, port_ret):    
     fig = plt.figure(figsize=(16,9))
     ax = fig.subplots(2, sharex='col')
@@ -159,14 +191,17 @@ def plotgraph(df, benchmark_ret, port_ret):
 
     plt.show()
 
-def plotreg(benchmark_ret,port_ret): # linear regression plot
+
+## linear regression graph plot
+def plotreg(benchmark_ret,port_ret): 
     sns.regplot(benchmark_ret.values, port_ret.values, scatter_kws={"color": "blue"}, line_kws={"color": "red"})
     plt.xlabel("Benchmark Returns", color ="red")
-    plt.ylabel("Portfolio Returns")
+    plt.ylabel("Portfolio Returns", color ="blue")
     plt.title("Portfolio Returns vs Benchmark Returns")
+    plt.grid(True)
     plt.show()
 
 
-
 main()        
+
 
